@@ -1,18 +1,18 @@
-def series_calculation(first_term, second_term, index)
-  return [first_term, second_term].max if index == 1
-  3.upto(index) do |series_step|
-    first_term, second_term =
-      sum_terms_over_series_step_parity(first_term, second_term, series_step)
+def series_calculation(predecessor, ante_predecessor, index)
+  return [predecessor, ante_predecessor].max if index == 1
+  3.upto(index) do |step|
+    predecessor, ante_predecessor =
+      sum_predecessors_over_step_parity(predecessor, ante_predecessor, step)
   end
-  index.even? ? first_term : second_term
+  index.even? ? predecessor : ante_predecessor
 end
 
-def sum_terms_over_series_step_parity(first_term, second_term, series_step)
-  case series_step.even?
-    when true  then first_term  += second_term
-    when false then second_term += first_term
+def sum_predecessors_over_step_parity(predecessor, ante_predecessor, step)
+  case step.even?
+    when true  then predecessor      += ante_predecessor
+    when false then ante_predecessor += predecessor
   end
-  return first_term, second_term
+  return predecessor, ante_predecessor
 end
 
 def series(sequence_name, index)

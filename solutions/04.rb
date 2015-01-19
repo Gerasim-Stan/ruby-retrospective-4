@@ -1,60 +1,145 @@
 module UI
-  def self.set_style_to_segment(segment, style)
-    if style.nil? or segment.frozen?
-      segment
-    else
-      segment.method(style).call
+  class Component
+    attr_writer :stylist
+
+    def initialize(parent)
+      @parent = parent
+      @stylist = -> text { text }
+    end
+
+    def stylize(text)
+      text = @parent.stylize(text) if @parent
+      @stylist.call text
     end
   end
 
-  class TextScreen
-    def self.draw
+  class Label < Component
+    def initialize(parent, text)
+      super(parent)
+      @text = text
+    end
+
+    def width
+      @text.size
+    end
+
+    def height
+      1
+    end
+
+    def row_to_string(row)
+      stylize @text
+    end
+  end
+
+  class BorderDecorator
+    def initialize(component, border)
+      @component = component
+      @border = border
+    end
+
+    def width
+      @component.width + 2 * @border.length
+    end
+
+    def height
+      @component.height
+    end
+
+    def stylize(text)
+      @component.stylize text
+    end
+
+    def row_to_string(row)
+      component_string = @component.row_to_string(row)
+      "#{@border}#{component_string.ljust(@component.width)}#{@border}"
+    end
+  end
+
+  class Container < Component
+    attr_reader :components
+
+    def initialize(parent = nil, &block)
+      super(parent)
       @components = []
-      @components_added_count = 0
-      instance_eval &Proc.new
-      @components.join
+      instance_eval(&block)
     end
 
-    def self.label(text:, style: nil, border: nil)
-      text = "#{border}#{text}#{border}"
-      text = text.method(style).call.freeze unless style.nil?
-      @components << text
-      @components_added_count += 1
+    def vertical(border: nil, style: nil, &block)
+      add decorate(VerticalGroup.new(self, &block), border, style)
     end
 
-    def self.vertical(border: nil, style: nil)
-      @components_added_count = 0
-      checked_components_count = @components.size - @components_added_count
-      yield
-      @components.map! { |segment| UI::set_style_to_segment(segment, style) }
-      alignment = @components[checked_components_count.. - 1]
-        .group_by(&:size).max.first
-      set_vertical_alignment(alignment, border)
+    def horizontal(border: nil, style: nil, &block)
+      add decorate(HorizontalGroup.new(self, &block), border, style)
     end
 
-    def self.set_vertical_alignment(alignment, border)
-      checked_components_count = @components.size - @components_added_count
-      @components[checked_components_count.. - 1].each do |segment|
-        segment.prepend("#{border}") << "#{border}\n"
-          .rjust(alignment - segment.size + border.to_s.size * 2 + 1)
+    def label(text:, border: nil, style: nil)
+      add decorate(Label.new(self, text), border, style)
+    end
+
+    private
+
+    def add(component)
+      @components << component
+    end
+
+    def decorate(component, border, style)
+      component.stylist = :downcase.to_proc              if style == :downcase
+      component.stylist = :upcase.to_proc                if style == :upcase
+      component = BorderDecorator.new(component, border) if border
+      component
+    end
+  end
+
+  class VerticalGroup < Container
+    def width
+      @components.map(&:width).max
+    end
+
+    def height
+      @components.map(&:height).reduce(:+)
+    end
+
+    def row_to_string(row)
+      components_reaches = @components.map.with_index do |component, index|
+        [component, @components.first(index + 1).map(&:height).reduce(:+)]
+      end.select { |_, component_reach| row < component_reach }
+      component, component_reach = components_reaches.first
+      component.row_to_string(row - component_reach + component.height)
+    end
+  end
+
+  class HorizontalGroup < Container
+    def width
+      @components.map(&:width).reduce(:+)
+    end
+
+    def height
+      @components.map(&:height).max
+    end
+
+    def row_to_string(row)
+      @components.map { |component| component_to_s component, row }.join
+    end
+
+    private
+
+    def component_to_s(component, row)
+      if component.height > row
+        component.row_to_string row
+      else
+        " " * component.width
       end
     end
+  end
 
-    def self.horizontal(border: nil, style: nil)
-      @components_added_count = 0
-      components_copy = @components.dup
-      yield
-      @components.map! { |segment| UI::set_style_to_segment(segment, style) }
-      components_copy = [(@components - components_copy).join]
-      set_horizontal_alignment(components_copy, border)
+  class TextScreen < HorizontalGroup
+    def self.draw(&block)
+      new(&block)
     end
 
-    def self.set_horizontal_alignment(components_copy, border)
-      alignment = @components.group_by(&:size).max.first
-      1.upto(@components_added_count) { |index| @components.delete_at(-1) }
-      @components += components_copy
-      @components.last.prepend("#{border}") << "#{border}"
-        .rjust(alignment - @components.last.size + border.to_s.size * 2 - 1)
+    def to_s
+      (0...height).map { |row| "#{row_to_string(row)}\n" }.join
     end
   end
 end

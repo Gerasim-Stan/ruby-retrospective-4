@@ -1,47 +1,52 @@
 module RBFS
-  class RBFS::File
-    attr_reader :data_type, :data
-
-    def init_data_type
-      @data_type = case @data
-                     when NilClass              then @data_type = :nil
-                     when String                then @data_type = :string
-                     when Symbol                then @data_type = :symbol
-                     when Numeric               then @data_type = :number
-                     when TrueClass, FalseClass then @data_type = :boolean
-                   end
+  class Parser
+    def initialize(data_string)
+      @data_string = data_string
     end
 
-    def initialize(data = nil, data_type = nil)
-      @data = data
-      if data_type.nil?
-        init_data_type
-      else
-        @data_type = data_type
-      end
-    end
-
-    def data=(data)
-      @data = data
-      init_data_type
-    end
-
-    def serialize
-      "#{@data_type}:#{@data.to_s}"
-    end
-
-    def self.parse(file_data)
-      case file_data.split(':', 2)[0]
-        when 'nil'     then File.new nil
-        when 'string'  then File.new file_data.split(':', 2)[1]
-        when 'symbol'  then File.new file_data.split(':', 2)[1].to_sym
-        when 'number'  then File.new file_data.split(':', 2)[1].to_f
-        when 'boolean' then File.new file_data.split(':', 2)[1] == 'true'
+    def parse_list
+      objects_number, @data_string = @data_string.split(':', 2)
+      objects_number.to_i.times do
+        object_name, object_length, object_left = @data_string.split(':', 3)
+        yield object_name, object_left[0...object_length.to_i]
+        @data_string = object_left[object_length.to_i..-1]
       end
     end
   end
 
-  class RBFS::Directory
+  class File
+    attr_accessor :data
+
+    def initialize(data = nil)
+      @data = data
+    end
+
+    def data_type
+      case @data
+        when NilClass              then :nil
+        when String                then :string
+        when Symbol                then :symbol
+        when Numeric               then :number
+        when TrueClass, FalseClass then :boolean
+      end
+    end
+
+    def serialize
+      "#{data_type}:#{data}"
+    end
+
+    def self.parse(file_data)
+      data_type_getter, data_getter = file_data.split(':', 2)
+      File.new case data_type_getter
+                 when 'string'  then data_getter
+                 when 'symbol'  then data_getter.to_sym
+                 when 'number'  then data_getter.to_f
+                 when 'boolean' then data_getter == 'true'
+               end
+    end
+  end
+
+  class Directory
     attr_accessor :directories, :files
 
     def initialize(directories = {}, files = {})
@@ -58,39 +63,32 @@ module RBFS
     end
 
     def [](name)
-      @directories[name].nil? ? @files[name] : @directories[name]
+      @files[name] || @directories[name]
     end
-
-    def serialize_files_or_directories(object)
-      object.map do|object_name, object_content|
-        serialized_object = object_content.serialize
-        "#{object_name}:#{serialized_object.length}:#{serialized_object}"
-      end
-      .join
-    end
-
     def serialize
-    "#{@files.size}:#{serialize_files_or_directories @files}" \
-    "#{@directories.size}:#{serialize_files_or_directories @directories}"
+      "#{serialize_list(@files)}#{serialize_list(@directories)}"
     end
 
-    def self.parse_files_or_directories(dir_data, type)
-      data, slash = {}, dir_data.split(':', 2)
-      1.upto(slash[0].to_i) do
-        slash[2] = slash[1].split(':', 3)
-        data[slash[2][0]] = type.new(slash[2][2].slice(0, slash[2][1].to_i)
-        .split(':')[1], slash[2][2].split(':')[0].to_sym)
-        slash[1] = slash[2][2].slice(slash[2][1].to_i, slash[2][2].length)
+    def self.parse(data_string)
+      directory = Directory.new
+      parser = Parser.new(data_string)
+      parser.parse_list do |name, data|
+        directory.add_file(name, File.parse(data))
       end
-      data[slash[2][0]] = parse(slash[2][2]) unless type != Directory or slash[2].nil?
-      [data, slash[1]]
+      parser.parse_list do |name, data|
+        directory.add_directory(name, Directory.parse(data))
+      end
+      directory
     end
 
-    def self.parse(dir_data)
-      directories, files = {}, {}
-      files, dir_data = parse_files_or_directories(dir_data, File)
-      directories, dir_data = parse_files_or_directories(dir_data, Directory)
-      directory = Directory.new directories, files
+    private
+
+    def serialize_list(objects)
+      serialized_objects = objects.map do |name, object|
+        serialized_object = object.serialize
+        "#{name}:#{serialized_object.length}:#{serialized_object}"
+      end
+      "#{objects.count}:#{serialized_objects.join('')}"
     end
   end
 end
